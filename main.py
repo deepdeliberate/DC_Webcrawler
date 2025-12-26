@@ -1,10 +1,17 @@
 import httpx
+import json
+import time
+
 from urllib.parse import urljoin, urlparse
 from crawler.frontier import URLFrontier
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from crawler.frontier import URLFrontier
+from crawler import parser
 from main_fetcher import fetch
+
+
+
 
 def extract_links(base_url, html):
     soup = BeautifulSoup(html, "lxml")
@@ -14,7 +21,10 @@ def extract_links(base_url, html):
         links.append(absolute_url)
     return links
 
-def is_same_domain(base_url, target_url):
+def is_allowed_path(url, allowed_prefix = "/wiki/"):
+    return urlparse(url).path.startswith(allowed_prefix)
+
+def is_allowed_domain(base_url, target_url):
     return urlparse(base_url).netloc == urlparse(target_url).netloc
 
 def fetch_robots_txt(base_url: str) -> str:
@@ -35,36 +45,57 @@ def fetch_robots_txt(base_url: str) -> str:
 
 
 def main():
-    base_url = "https://books.toscrape.com"
+    # base_url = "https://books.toscrape.com"
+    base_url = "https://www.detectiveconanworld.com/"
     frontier = URLFrontier(base_url)
 
-    frontier.add_url(base_url, depth=0)
+    frontier.add_url("wiki/", depth=0)
+
+    max_depth = 2
+    crawl_delay = 1
+    all_pages = []
+
+    max_pages = 10
+    crawled_pages = 0
 
     # Crawl loop
-    while frontier.has_urls():
+    while frontier.has_urls() and crawled_pages < max_pages:
         url, depth = frontier.get_next()
-        if (url is None) or (depth > 2):
+        if (url is None) or (depth > max_depth):
             continue
 
+        if not is_allowed_domain(base_url, url) or not is_allowed_path(url):
+            continue
+
+
         print(f"Crawling {url} at depth {depth}")
-        r = fetch(url)
+        try:
+            r = fetch(url)
+        except Exception as e:
+            print(f"Failed to fetch {url}: {e}")
+            continue
+
         if r.status_code == 200:
+            data = parser.parse_wiki_page(r.text)
+            data["url"] = url
+            all_pages.append(data)
             html = r.text
-            print(html[:100])
+            print(f"-> found page: {data['title']}")
 
             # Extract links
             links = extract_links(url, html)
             for link in links:
-                frontier.add_url(link, depth=depth + 1)
+                if is_allowed_domain(base_url, link) and is_allowed_path(link):
+                    frontier.add_url(link, depth=depth + 1)
+        
+        # Politeness
+        time.sleep(crawl_delay)
+        crawled_pages += 1
 
-    robots_content = fetch_robots_txt(base_url)
-    print("robots.txt preview:")
-    print(robots_content[:300], "\n")
+    with open("wiki_pages.json", "w", encoding="utf-8") as f:
+        json.dump(all_pages, f, ensure_ascii = False, indent = 2)
+    print(f"\nCrawled {len(all_pages)} pages. Results saved to wiki_pages.json")
 
-    r = fetch(base_url)
-
-    print(r.status_code)
-    print(r.text[:100])
 
 if __name__ == "__main__":
     main()

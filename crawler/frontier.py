@@ -24,7 +24,7 @@ class URLFrontier:
     def add_url(self, url, depth = 0):
         """Add URL To frontier if not seen and allowed by robots.txt"""
         normalized_url = urljoin(self.base_url, url)
-        if normalized_url not in self.seen and self.robots_parser.can_fetch("*", normalized_url):
+        if normalized_url not in self.seen:
             self.queue.append((normalized_url, depth))
             self.seen.add(normalized_url)
 
